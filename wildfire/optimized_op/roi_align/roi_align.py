@@ -2,6 +2,7 @@ import torch
 from torch.autograd import Function
 from numba import cuda
 import torch
+import math
 
 from time import perf_counter as pc
 
@@ -46,30 +47,27 @@ def roi_align_forward_kernel(features, rois, output, f_c, f_h, f_w, r_n, aligned
     if index < r_n * f_c * aligned_width * aligned_height:
 
         pw = index % aligned_width
-        ph = (index // aligned_width) % aligned_height
-        c = (index // aligned_width // aligned_height) % f_c
-        n = index // aligned_width // aligned_height // f_c
+        _ph = index // aligned_width
+        ph = _ph % aligned_height
+        _c = _ph // aligned_height
+        c = _c % f_c
+        n = _c // f_c
 
-        roi_batch_ind = rois[n * 5 + 0]
-        roi_start_w = rois[n * 5 + 1] * spatial_scale
-        roi_start_h = rois[n * 5 + 2] * spatial_scale
-        roi_end_w = rois[n * 5 + 3] * spatial_scale
-        roi_end_h = rois[n * 5 + 4] * spatial_scale
+        roi_start_w = rois[n * 5 + 1]
+        roi_start_h = rois[n * 5 + 2]
 
-        roi_width = max(roi_end_w - roi_start_w, 0.)
-        roi_height = max(roi_end_h - roi_start_h, 0.)
+        roi_width = max(rois[n * 5 + 3] - roi_start_w, 0.) * spatial_scale
+        roi_height = max(rois[n * 5 + 4] - roi_start_h, 0.) * spatial_scale
         bin_size_h = roi_height / aligned_height
         bin_size_w = roi_width / aligned_width
 
         h = ph * bin_size_h + roi_start_h
         w = pw * bin_size_w + roi_start_w
 
-        hstart = min(h // 1, f_h)
-        wstart = min(w // 1, f_w)
+        hstart = min(math.floor(h), f_h)
+        wstart = min(math.floor(w), f_w)
 
-        feature_start = roi_batch_ind * f_c * f_h * f_w
-
-        interpolated = 0
+        feature_start = rois[n * 5] * f_c * f_h * f_w
 
         if h < 0 or h >= f_h or w < 0 or w >= f_w:
             output[index] = 0
@@ -77,15 +75,11 @@ def roi_align_forward_kernel(features, rois, output, f_c, f_h, f_w, r_n, aligned
             h_ratio = h - hstart
             w_ratio = w - wstart
             upleft = int(feature_start + (c * f_h + hstart) * f_w + wstart)
-            upright = upleft + 1
-            downleft = upleft + f_w
-            downright = downleft + 1
 
-            interpolated += features[upleft] * (1 - h_ratio) * (1 - w_ratio)
-            interpolated += features[upright] * (1 - h_ratio) * w_ratio
-            interpolated += features[downleft] * h_ratio * (1 - w_ratio)
-            interpolated += features[downright] * h_ratio * w_ratio
-            output[index] = interpolated
+            output[index] = features[upleft] * (1 - h_ratio) * (1 - w_ratio) + \
+                            features[upleft + 1] * (1 - h_ratio) * w_ratio + \
+                            features[upleft + f_w] * h_ratio * (1 - w_ratio) + \
+                            features[upleft + f_w + 1] * h_ratio * w_ratio
 
 
 @cuda.jit
@@ -96,41 +90,37 @@ def roi_align_backward_kernel(top_grad, rois, bottom_grad, f_c, f_w, f_h, r_n, a
     if index < r_n * f_c * aligned_width * aligned_height:
 
         pw = index % aligned_width
-        ph = (index // aligned_width) % aligned_height
-        c = (index // aligned_width // aligned_height) % f_c
-        n = index // aligned_width // aligned_height // f_c
+        _ph = index // aligned_width
+        ph = _ph % aligned_height
+        _c = _ph // aligned_height
+        c = _c % f_c
+        n = _c // f_c
 
-        roi_batch_ind = rois[n * 5 + 0]
-        roi_start_w = rois[n * 5 + 1] * spatial_scale
-        roi_start_h = rois[n * 5 + 2] * spatial_scale
-        roi_end_w = rois[n * 5 + 3] * spatial_scale
-        roi_end_h = rois[n * 5 + 4] * spatial_scale
+        roi_start_w = rois[n * 5 + 1]
+        roi_start_h = rois[n * 5 + 2]
 
-        roi_width = max(roi_end_w - roi_start_w, 0.)
-        roi_height = max(roi_end_h - roi_start_h, 0.)
+        roi_width = max(rois[n * 5 + 3] - roi_start_w, 0.) * spatial_scale
+        roi_height = max(rois[n * 5 + 4] - roi_start_h, 0.) * spatial_scale
         bin_size_h = roi_height / aligned_height
         bin_size_w = roi_width / aligned_width
 
         h = ph * bin_size_h + roi_start_h
         w = pw * bin_size_w + roi_start_w
 
-        hstart = min(h // 1, f_h)
-        wstart = min(w // 1, f_w)
+        hstart = min(math.floor(h), f_h)
+        wstart = min(math.floor(w), f_w)
 
-        bottom_grad_start = roi_batch_ind * f_c * f_h * f_w
+        bottom_grad_start = rois[n * 5] * f_c * f_h * f_w
 
         if not (h < 0 or h >= f_h or w < 0 or w >= f_w):
             h_ratio = h - hstart
             w_ratio = w - wstart
             upleft = int(bottom_grad_start + (c * f_h + hstart) * f_w + wstart)
-            upright = upleft + 1
-            downleft = upleft + f_w
-            downright = downleft + 1
 
             cuda.atomic.add(bottom_grad, upleft, top_grad[index] * (1. - h_ratio) * (1. - w_ratio))
-            cuda.atomic.add(bottom_grad, upright, top_grad[index] * (1. - h_ratio) * w_ratio)
-            cuda.atomic.add(bottom_grad, downleft, top_grad[index] * h_ratio * (1. - w_ratio))
-            cuda.atomic.add(bottom_grad, downright, top_grad[index] * h_ratio * w_ratio)
+            cuda.atomic.add(bottom_grad, upleft + 1, top_grad[index] * (1. - h_ratio) * w_ratio)
+            cuda.atomic.add(bottom_grad, upleft + f_w, top_grad[index] * h_ratio * (1. - w_ratio))
+            cuda.atomic.add(bottom_grad, upleft + f_w + 1, top_grad[index] * h_ratio * w_ratio)
 
 
 def roi_align_forward_cuda(features, rois, aligned_height, aligned_width, spatial_scale):
