@@ -1,7 +1,7 @@
 import torch
 from torch.autograd import Function
 from .._ext import roi_align
-
+from time import perf_counter as pc
 
 class RoIAlignFunction(Function):
     def __init__(self, aligned_height, aligned_width, spatial_scale):
@@ -20,10 +20,14 @@ class RoIAlignFunction(Function):
 
         output = features.new(num_rois, num_channels, self.aligned_height, self.aligned_width).zero_()
         if features.is_cuda:
+            # tic = pc()
             roi_align.roi_align_forward_cuda(self.aligned_height,
                                              self.aligned_width,
                                              self.spatial_scale, features,
                                              rois, output)
+            torch.cuda.synchronize()
+            # toc = pc()
+            # print((toc - tic) * 1e3, 'native kernel time')
         else:
             roi_align.roi_align_forward(self.aligned_height,
                                         self.aligned_width,
@@ -35,7 +39,6 @@ class RoIAlignFunction(Function):
 
     def backward(self, grad_output):
         assert(self.feature_size is not None and grad_output.is_cuda)
-
         batch_size, num_channels, data_height, data_width = self.feature_size
 
         grad_input = self.rois.new(batch_size, num_channels, data_height,
@@ -44,7 +47,5 @@ class RoIAlignFunction(Function):
                                           self.aligned_width,
                                           self.spatial_scale, grad_output,
                                           self.rois, grad_input)
-
-        # print grad_input
 
         return grad_input, None

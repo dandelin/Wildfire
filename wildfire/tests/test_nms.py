@@ -22,7 +22,7 @@ def test():
     numba_time = []
     native_time = []
 
-    progress = tqdm.tqdm(range(10 ** 3))
+    progress = tqdm.tqdm(range(10 ** 2))
 
     for _ in progress:
         tic = pc()
@@ -32,14 +32,15 @@ def test():
 
         tic = pc()
         keep2 = nms_native(boxes, criteria, thresh)
+        torch.cuda.synchronize()
         toc = pc()
         native_time.append(toc - tic)
 
         progress.set_description(f'Error : {(keep1.float() - keep2.float()).mean():.4f}')
 
-    print(f'numba_nms : min {min(numba_time[1:]) * 1e+6 / 10**3:.4f}us, '
-          f'max {max(numba_time[1:]) * 1e+6 / 10**3:.4f}us, '
-          f'sum {sum(numba_time[1:]) * 1e+6 / 10**3:.4f}us '
-          f'cuda_nms : min {min(native_time[1:]) * 1e+6 / 10**3:.4f}us, '
-          f'max {max(native_time[1:]) * 1e+6 / 10**3:.4f}us, '
-          f'sum {sum(native_time[1:]) * 1e+6 / 10**3:.4f}us')
+    print(f'numba_nms : min {min(numba_time[1:]) * 1e+3:.4f}ms, '
+          f'max {max(numba_time[1:]) * 1e+3:.4f}ms, '
+          f'sum {sum(numba_time[1:]) * 1e+3:.4f}ms '
+          f'cuda_nms : min {min(native_time[1:]) * 1e+3:.4f}ms, '
+          f'max {max(native_time[1:]) * 1e+3:.4f}ms, '
+          f'sum {sum(native_time[1:]) * 1e+3:.4f}ms')
