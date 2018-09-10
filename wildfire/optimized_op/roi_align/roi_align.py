@@ -41,7 +41,7 @@ def link_tensor(tensor):
     return device_array
 
 @cuda.jit
-def roi_align_forward_kernel(features, rois, output, f_c, f_h, f_w, r_n, aligned_height, aligned_width, spatial_scale):
+def roi_align_forward_kernel(features, rois, bids, output, f_c, f_h, f_w, r_n, aligned_height, aligned_width):
     index = cuda.grid(1)
 
     if index < r_n * f_c * aligned_width * aligned_height:
@@ -53,25 +53,22 @@ def roi_align_forward_kernel(features, rois, output, f_c, f_h, f_w, r_n, aligned
         c = _c % f_c
         n = _c // f_c
 
-        roi_start_w = rois[n * 5 + 1]
-        roi_start_h = rois[n * 5 + 2]
-
-        roi_width = max(rois[n * 5 + 3] - roi_start_w, 0.) * spatial_scale
-        roi_height = max(rois[n * 5 + 4] - roi_start_h, 0.) * spatial_scale
-        bin_size_h = roi_height / aligned_height
-        bin_size_w = roi_width / aligned_width
+        roi_start_w = rois[n * 4]
+        roi_start_h = rois[n * 4 + 1]
+        bin_size_w = rois[n * 4 + 2]
+        bin_size_h = rois[n * 4 + 3]
 
         h = ph * bin_size_h + roi_start_h
         w = pw * bin_size_w + roi_start_w
 
-        hstart = min(math.floor(h), f_h)
-        wstart = min(math.floor(w), f_w)
-
-        feature_start = rois[n * 5] * f_c * f_h * f_w
+        feature_start = bids[n]
 
         if h < 0 or h >= f_h or w < 0 or w >= f_w:
             output[index] = 0
         else:
+            hstart = min(math.floor(h), f_h)
+            wstart = min(math.floor(w), f_w)
+
             h_ratio = h - hstart
             w_ratio = w - wstart
             upleft = int(feature_start + (c * f_h + hstart) * f_w + wstart)
@@ -83,8 +80,7 @@ def roi_align_forward_kernel(features, rois, output, f_c, f_h, f_w, r_n, aligned
 
 
 @cuda.jit
-def roi_align_backward_kernel(top_grad, rois, bottom_grad, f_c, f_w, f_h, r_n, aligned_height, aligned_width,
-                              spatial_scale):
+def roi_align_backward_kernel(top_grad, rois, bids, bottom_grad, f_c, f_w, f_h, r_n, aligned_height, aligned_width):
     index = cuda.grid(1)
 
     if index < r_n * f_c * aligned_width * aligned_height:
@@ -96,23 +92,20 @@ def roi_align_backward_kernel(top_grad, rois, bottom_grad, f_c, f_w, f_h, r_n, a
         c = _c % f_c
         n = _c // f_c
 
-        roi_start_w = rois[n * 5 + 1]
-        roi_start_h = rois[n * 5 + 2]
-
-        roi_width = max(rois[n * 5 + 3] - roi_start_w, 0.) * spatial_scale
-        roi_height = max(rois[n * 5 + 4] - roi_start_h, 0.) * spatial_scale
-        bin_size_h = roi_height / aligned_height
-        bin_size_w = roi_width / aligned_width
+        roi_start_w = rois[n * 4]
+        roi_start_h = rois[n * 4 + 1]
+        bin_size_w = rois[n * 4 + 2]
+        bin_size_h = rois[n * 4 + 3]
 
         h = ph * bin_size_h + roi_start_h
         w = pw * bin_size_w + roi_start_w
 
-        hstart = min(math.floor(h), f_h)
-        wstart = min(math.floor(w), f_w)
-
-        bottom_grad_start = rois[n * 5] * f_c * f_h * f_w
+        bottom_grad_start = bids[n]
 
         if not (h < 0 or h >= f_h or w < 0 or w >= f_w):
+            hstart = min(math.floor(h), f_h)
+            wstart = min(math.floor(w), f_w)
+
             h_ratio = h - hstart
             w_ratio = w - wstart
             upleft = int(bottom_grad_start + (c * f_h + hstart) * f_w + wstart)
@@ -123,16 +116,27 @@ def roi_align_backward_kernel(top_grad, rois, bottom_grad, f_c, f_w, f_h, r_n, a
             cuda.atomic.add(bottom_grad, upleft + f_w + 1, top_grad[index] * h_ratio * w_ratio)
 
 
-def roi_align_forward_cuda(features, rois, aligned_height, aligned_width, spatial_scale):
-    # tic = pc()
-    thread_per_block = 1024
-    output = features.new(rois.size(0), features.size(1), aligned_height, aligned_width).zero_()
-
+def roi_align_forward_cuda(features, rois, bids, aligned_height, aligned_width, spatial_scale):
+    thread_per_block = 64
     f_n, f_c, f_h, f_w = features.shape
     r_n, _5 = rois.shape
 
+    output = features.new(rois.size(0), features.size(1), aligned_height, aligned_width).zero_()
+
+    new_bids = bids * f_c * f_h * f_w
+    new_rois = rois * spatial_scale
+
+    roi_width = torch.clamp(new_rois[:, 2] - new_rois[:, 0], 0)
+    roi_height = torch.clamp(new_rois[:, 3] - new_rois[:, 1], 0)
+    roi_bin_width = roi_width / aligned_width
+    roi_bin_height = roi_height / aligned_height
+
+    new_rois[:, 2] = roi_bin_width
+    new_rois[:, 3] = roi_bin_height
+
     features_flat = features.reshape(-1)
-    rois_flat = rois.reshape(-1)
+    rois_flat = new_rois.reshape(-1)
+    bids_flat = new_bids.reshape(-1)
     output_flat = output.reshape(-1)
 
     blocks = (output.numel() + thread_per_block - 1) // thread_per_block
@@ -140,31 +144,37 @@ def roi_align_forward_cuda(features, rois, aligned_height, aligned_width, spatia
 
     features_l = link_tensor(features_flat)
     rois_l = link_tensor(rois_flat)
+    bids_l = link_tensor(bids_flat)
     output_l = link_tensor(output_flat)
-    # torch.cuda.synchronize()
-    # toc = pc()
-    # print((toc - tic) * 1e3)
 
-    # tic = pc()
     roi_align_forward_kernel[blocks, threads](
-        features_l, rois_l, output_l, f_c, f_h, f_w, r_n, aligned_height, aligned_width, spatial_scale
+        features_l, rois_l, bids_l, output_l, f_c, f_h, f_w, r_n, aligned_height, aligned_width
     )
-    # torch.cuda.synchronize()
-    # toc = pc()
-    # print((toc - tic) * 1e3)
 
     return output_flat.reshape(rois.size(0), features.size(1), aligned_height, aligned_width)
 
 
-def roi_align_backward_cuda(top_grad, rois, aligned_height, aligned_width, spatial_scale, feature_size):
-    thread_per_block = 1024
+def roi_align_backward_cuda(top_grad, rois, bids, aligned_height, aligned_width, spatial_scale, feature_size):
+    thread_per_block = 64
     f_n, f_c, f_h, f_w = feature_size
-    bottom_grad = top_grad.new(f_n, f_c, f_h, f_w).zero_()
-
     r_n, _5 = rois.shape
 
+    bottom_grad = top_grad.new(f_n, f_c, f_h, f_w).zero_()
+
+    new_bids = bids * f_c * f_h * f_w
+    new_rois = rois * spatial_scale
+
+    roi_width = torch.clamp(new_rois[:, 2] - new_rois[:, 0], 0)
+    roi_height = torch.clamp(new_rois[:, 3] - new_rois[:, 1], 0)
+    roi_bin_width = roi_width / aligned_width
+    roi_bin_height = roi_height / aligned_height
+
+    new_rois[:, 2] = roi_bin_width
+    new_rois[:, 3] = roi_bin_height
+
     top_grad_flat = top_grad.reshape(-1)
-    rois_flat = rois.reshape(-1)
+    rois_flat = new_rois.reshape(-1)
+    bids_flat = new_bids.reshape(-1)
     bottom_grad_flat = bottom_grad.reshape(-1)
 
     blocks = (r_n * aligned_height * aligned_width * f_c + thread_per_block - 1) // thread_per_block
@@ -172,11 +182,14 @@ def roi_align_backward_cuda(top_grad, rois, aligned_height, aligned_width, spati
 
     top_grad_l = link_tensor(top_grad_flat)
     rois_l = link_tensor(rois_flat)
+    bids_l = link_tensor(bids_flat)
     bottom_grad_l = link_tensor(bottom_grad_flat)
 
     roi_align_backward_kernel[blocks, threads](
-        top_grad_l, rois_l, bottom_grad_l, f_c, f_w, f_h, r_n, aligned_height, aligned_width, spatial_scale
+        top_grad_l, rois_l, bids_l, bottom_grad_l, f_c, f_w, f_h, r_n, aligned_height, aligned_width
     )
+    # with open('inspection_backward.txt', 'w') as fp:
+    #     roi_align_backward_kernel.inspect_types(file=fp)
 
     return bottom_grad_flat.reshape(f_n, f_c, f_h, f_w)
 
@@ -187,17 +200,19 @@ class RoIAlignFunction(Function):
         self.aligned_height = aligned_height
         self.spatial_scale = spatial_scale
         self.rois = None
+        self.bids = None
         self.feature_size = None
 
-    def forward(self, features, rois):
+    def forward(self, features, rois, bids):
         self.rois = rois
+        self.bids = bids
         self.feature_size = features.size()
 
-        output = roi_align_forward_cuda(features, rois, self.aligned_height, self.aligned_width, self.spatial_scale)
+        output = roi_align_forward_cuda(features, rois, bids, self.aligned_height, self.aligned_width, self.spatial_scale)
         return output
 
     def backward(self, top_grad):
-        bottom_grad = roi_align_backward_cuda(top_grad, self.rois, self.aligned_height, self.aligned_width,
+        bottom_grad = roi_align_backward_cuda(top_grad, self.rois, self.bids, self.aligned_height, self.aligned_width,
                                               self.spatial_scale, self.feature_size)
 
-        return bottom_grad, None
+        return bottom_grad, None, None

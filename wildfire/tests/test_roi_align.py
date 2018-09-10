@@ -8,9 +8,11 @@ import tqdm
 def test():
     rand_xy = torch.rand(10 ** 3, 2).cuda()
     boxes = torch.cat([rand_xy + 1, rand_xy + 4], dim=1)
-    batch_idx = (torch.rand(10 ** 3, 1) > 0.5).to(boxes)
-    rois1 = torch.cat([batch_idx, boxes], dim=1)
-    rois2 = rois1.clone()
+
+    rois1 = boxes.clone()
+    bids1 = (torch.rand(10 ** 3) > 0.5).to(boxes).long()
+
+    rois2 = torch.cat([bids1.clone().unsqueeze(1).float(), rois1.clone()], dim=1)
 
     features1 = torch.rand(2, 1024, 20, 20).cuda()
     features2 = features1.clone()
@@ -35,7 +37,7 @@ def test():
             features2.grad.zero_()
 
         tic = pc()
-        pooled1 = roi_align_numba(7, 7, 1)(features1, rois1)
+        pooled1 = roi_align_numba(7, 7, 1)(features1, rois1, bids1)
         torch.cuda.synchronize()
         toc = pc()
         numba_time_forward.append(toc - tic)
