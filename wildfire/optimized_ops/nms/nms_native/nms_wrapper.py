@@ -5,7 +5,7 @@
 # Written by Ross Girshick
 # --------------------------------------------------------
 import torch
-from wildfire.optimized_op.nms.nms_native.nms_gpu import nms_gpu
+from wildfire.optimized_ops.nms.nms_native.nms_gpu import nms_gpu
 
 def nms(dets, thresh, force_cpu=False):
     """Dispatch to either CPU or GPU NMS implementations."""

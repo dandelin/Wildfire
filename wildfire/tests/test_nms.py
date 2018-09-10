@@ -1,5 +1,5 @@
-from wildfire.optimized_op.nms.nms_native.nms_wrapper import nms as nms_native_kernel
-from wildfire.optimized_op.nms.non_maximum_suppression import nms as nms_numba
+from wildfire.optimized_ops.nms.nms_native.nms_wrapper import nms as nms_native_kernel
+from wildfire.optimized_ops.nms.nms import nms as nms_numba
 from time import perf_counter as pc
 import torch
 import tqdm
@@ -14,6 +14,8 @@ def nms_native(boxes, crits, overlap=0.5):
 
 
 def test():
+    N = 10 ** 3
+
     rand_xy = torch.rand(10 ** 4, 2).cuda()
     boxes = torch.cat([rand_xy, rand_xy + 2], dim=1)
     criteria = torch.rand(10 ** 4).cuda()
@@ -22,7 +24,7 @@ def test():
     numba_time = []
     native_time = []
 
-    progress = tqdm.tqdm(range(10 ** 2))
+    progress = tqdm.tqdm(range(N))
 
     for _ in progress:
         tic = pc()
@@ -38,9 +40,9 @@ def test():
 
         progress.set_description(f'Error : {(keep1.float() - keep2.float()).mean():.4f}')
 
-    print(f'numba_nms : min {min(numba_time[1:]) * 1e+3:.4f}ms, '
-          f'max {max(numba_time[1:]) * 1e+3:.4f}ms, '
-          f'sum {sum(numba_time[1:]) * 1e+3:.4f}ms '
-          f'cuda_nms : min {min(native_time[1:]) * 1e+3:.4f}ms, '
-          f'max {max(native_time[1:]) * 1e+3:.4f}ms, '
-          f'sum {sum(native_time[1:]) * 1e+3:.4f}ms')
+    print(f'numba_nms : min {min(numba_time[1:]) * 1e+3:.4f}ms '
+          f'max {max(numba_time[1:]) * 1e+3:.4f}ms '
+          f'mean {sum(numba_time[1:]) * 1e+3 / (N - 1):.4f}ms\n'
+          f'cuda_nms : min {min(native_time[1:]) * 1e+3:.4f}ms '
+          f'max {max(native_time[1:]) * 1e+3:.4f}ms '
+          f'mean {sum(native_time[1:]) * 1e+3 / (N - 1):.4f}ma')

@@ -47,21 +47,14 @@ def roi_align_forward_kernel(features, rois, bids, output, f_c, f_h, f_w, r_n, a
     if index < r_n * f_c * aligned_width * aligned_height:
 
         pw = index % aligned_width
-        _ph = index // aligned_width
-        ph = _ph % aligned_height
-        _c = _ph // aligned_height
-        c = _c % f_c
-        n = _c // f_c
+        ph = index // aligned_width % aligned_height
+        c = index // aligned_width // aligned_height % f_c
+        n = index // aligned_width // aligned_height // f_c
 
-        roi_start_w = rois[n * 4]
-        roi_start_h = rois[n * 4 + 1]
-        bin_size_w = rois[n * 4 + 2]
-        bin_size_h = rois[n * 4 + 3]
+        roi_start_w, roi_start_h, bin_size_w, bin_size_h = rois[n * 4: n * 4 + 4]
 
         h = ph * bin_size_h + roi_start_h
         w = pw * bin_size_w + roi_start_w
-
-        feature_start = bids[n]
 
         if h < 0 or h >= f_h or w < 0 or w >= f_w:
             output[index] = 0
@@ -71,7 +64,7 @@ def roi_align_forward_kernel(features, rois, bids, output, f_c, f_h, f_w, r_n, a
 
             h_ratio = h - hstart
             w_ratio = w - wstart
-            upleft = int(feature_start + (c * f_h + hstart) * f_w + wstart)
+            upleft = int(bids[n] + c * f_h * f_w + hstart * f_w + wstart)
 
             output[index] = features[upleft] * (1 - h_ratio) * (1 - w_ratio) + \
                             features[upleft + 1] * (1 - h_ratio) * w_ratio + \
@@ -86,21 +79,14 @@ def roi_align_backward_kernel(top_grad, rois, bids, bottom_grad, f_c, f_w, f_h, 
     if index < r_n * f_c * aligned_width * aligned_height:
 
         pw = index % aligned_width
-        _ph = index // aligned_width
-        ph = _ph % aligned_height
-        _c = _ph // aligned_height
-        c = _c % f_c
-        n = _c // f_c
+        ph = index // aligned_width % aligned_height
+        c = index // aligned_width // aligned_height % f_c
+        n = index // aligned_width // aligned_height // f_c
 
-        roi_start_w = rois[n * 4]
-        roi_start_h = rois[n * 4 + 1]
-        bin_size_w = rois[n * 4 + 2]
-        bin_size_h = rois[n * 4 + 3]
+        roi_start_w, roi_start_h, bin_size_w, bin_size_h = rois[n * 4: n * 4 + 4]
 
         h = ph * bin_size_h + roi_start_h
         w = pw * bin_size_w + roi_start_w
-
-        bottom_grad_start = bids[n]
 
         if not (h < 0 or h >= f_h or w < 0 or w >= f_w):
             hstart = min(math.floor(h), f_h)
@@ -108,7 +94,7 @@ def roi_align_backward_kernel(top_grad, rois, bids, bottom_grad, f_c, f_w, f_h, 
 
             h_ratio = h - hstart
             w_ratio = w - wstart
-            upleft = int(bottom_grad_start + (c * f_h + hstart) * f_w + wstart)
+            upleft = int(bids[n] + c * f_h * f_w + hstart * f_w + wstart)
 
             cuda.atomic.add(bottom_grad, upleft, top_grad[index] * (1. - h_ratio) * (1. - w_ratio))
             cuda.atomic.add(bottom_grad, upleft + 1, top_grad[index] * (1. - h_ratio) * w_ratio)
@@ -150,6 +136,8 @@ def roi_align_forward_cuda(features, rois, bids, aligned_height, aligned_width, 
     roi_align_forward_kernel[blocks, threads](
         features_l, rois_l, bids_l, output_l, f_c, f_h, f_w, r_n, aligned_height, aligned_width
     )
+    with open('inspection_forward.txt', 'w') as fp:
+        roi_align_forward_kernel.inspect_types(file=fp)
 
     return output_flat.reshape(rois.size(0), features.size(1), aligned_height, aligned_width)
 
