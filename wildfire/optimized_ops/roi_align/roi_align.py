@@ -1,10 +1,10 @@
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 from torch.autograd import Function
 from numba import cuda
 import torch
 import math
-
-from time import perf_counter as pc
 
 def typestr(tensor):
     import sys
@@ -28,6 +28,7 @@ def typestr(tensor):
     return endianness + types[tensor.dtype]
 
 def link_tensor(tensor):
+    cuda.select_device(tensor.get_device())
     cai_dict = {
         'shape': tuple(tensor.shape),
         'data': (tensor.data_ptr(), False),
@@ -106,6 +107,7 @@ def roi_align_forward_cuda(features, rois, bids, aligned_height, aligned_width, 
     thread_per_block = 64
     f_n, f_c, f_h, f_w = features.shape
     r_n, _5 = rois.shape
+    aligned_height, aligned_width, spatial_scale = aligned_height.item(), aligned_width.item(), spatial_scale.item()
 
     output = features.new(rois.size(0), features.size(1), aligned_height, aligned_width).zero_()
 
@@ -136,8 +138,6 @@ def roi_align_forward_cuda(features, rois, bids, aligned_height, aligned_width, 
     roi_align_forward_kernel[blocks, threads](
         features_l, rois_l, bids_l, output_l, f_c, f_h, f_w, r_n, aligned_height, aligned_width
     )
-    with open('inspection_forward.txt', 'w') as fp:
-        roi_align_forward_kernel.inspect_types(file=fp)
 
     return output_flat.reshape(rois.size(0), features.size(1), aligned_height, aligned_width)
 
@@ -146,6 +146,7 @@ def roi_align_backward_cuda(top_grad, rois, bids, aligned_height, aligned_width,
     thread_per_block = 64
     f_n, f_c, f_h, f_w = feature_size
     r_n, _5 = rois.shape
+    aligned_height, aligned_width, spatial_scale = aligned_height.item(), aligned_width.item(), spatial_scale.item()
 
     bottom_grad = top_grad.new(f_n, f_c, f_h, f_w).zero_()
 
@@ -176,31 +177,32 @@ def roi_align_backward_cuda(top_grad, rois, bids, aligned_height, aligned_width,
     roi_align_backward_kernel[blocks, threads](
         top_grad_l, rois_l, bids_l, bottom_grad_l, f_c, f_w, f_h, r_n, aligned_height, aligned_width
     )
-    # with open('inspection_backward.txt', 'w') as fp:
-    #     roi_align_backward_kernel.inspect_types(file=fp)
 
     return bottom_grad_flat.reshape(f_n, f_c, f_h, f_w)
 
 
 class RoIAlignFunction(Function):
-    def __init__(self, aligned_height, aligned_width, spatial_scale):
-        self.aligned_width = aligned_width
-        self.aligned_height = aligned_height
-        self.spatial_scale = spatial_scale
-        self.rois = None
-        self.bids = None
-        self.feature_size = None
-
-    def forward(self, features, rois, bids):
-        self.rois = rois
-        self.bids = bids
-        self.feature_size = features.size()
-
-        output = roi_align_forward_cuda(features, rois, bids, self.aligned_height, self.aligned_width, self.spatial_scale)
+    @staticmethod
+    def forward(ctx, features, rois, bids, aligned_height, aligned_width, spatial_scale):
+        output = roi_align_forward_cuda(features, rois, bids, aligned_height, aligned_width, spatial_scale)
+        ctx.save_for_backward(features, rois, bids, aligned_height, aligned_width, spatial_scale)
         return output
 
-    def backward(self, top_grad):
-        bottom_grad = roi_align_backward_cuda(top_grad, self.rois, self.bids, self.aligned_height, self.aligned_width,
-                                              self.spatial_scale, self.feature_size)
+    @staticmethod
+    def backward(ctx, grad_output):
+        features, rois, bids, aligned_height, aligned_width, spatial_scale = ctx.saved_tensors
+        bottom_grad = roi_align_backward_cuda(grad_output, rois, bids, aligned_height, aligned_width, spatial_scale, features.shape)
+        return bottom_grad, None, None, None, None, None
 
-        return bottom_grad, None, None
+class RoIAlignAvg(nn.Module):
+    def __init__(self, aligned_height, aligned_width, spatial_scale):
+        super(RoIAlignAvg, self).__init__()
+
+        self.aligned_width = torch.tensor(aligned_width)
+        self.aligned_height = torch.tensor(aligned_height)
+        self.spatial_scale = torch.tensor(spatial_scale)
+
+    def forward(self, features, rois, bids):
+        roi_align = RoIAlignFunction.apply
+        x = roi_align(features, rois, bids, self.aligned_height + 1, self.aligned_width + 1, self.spatial_scale)
+        return F.avg_pool2d(x, kernel_size=2, stride=1)

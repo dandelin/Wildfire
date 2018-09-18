@@ -37,16 +37,19 @@ def nms_kernel(boxes, thresh):
 
     return np.where(suppressed == 0)[0]
 
-def nms(boxes, criteria, thresh):
+def nms(boxes, criteria, thresh, pre=None, post=None):
     """
     :param boxes: Tensor [N, 4], unsorted
     :param criteria: Tensor [N]
     :param thresh: Scalar
     :return:
     """
-    _, indices = criteria.sort(descending=True)
-    sorted_boxes = boxes[indices]
 
-    keep = nms_kernel(sorted_boxes.cpu().numpy(), thresh)
+    crits, sort_idx = criteria.sort(descending=True)
+    crits, sort_idx = crits[:pre], sort_idx[:pre]
+    bbox = boxes[sort_idx]
 
-    return indices[keep]
+    keep = nms_kernel(bbox.cpu().numpy(), thresh)
+    keep = keep[:post]
+
+    return sort_idx[keep]
