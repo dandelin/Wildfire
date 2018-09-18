@@ -1,5 +1,5 @@
-from wildfire.optimized_ops.roi_align.roi_align_native.functions.roi_align import RoIAlignFunction as roi_align_native
-from wildfire.optimized_ops.roi_align.roi_align import RoIAlignFunction as roi_align_numba
+from wildfire.optimized_ops.roi_align.roi_align_native.modules.roi_align import RoIAlignAvg as roi_align_native
+from wildfire.optimized_ops.roi_align.roi_align import RoIAlignAvg as roi_align_numba
 from time import perf_counter as pc
 from numba import cuda
 import torch
