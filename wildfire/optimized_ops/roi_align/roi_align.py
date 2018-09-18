@@ -60,8 +60,8 @@ def roi_align_forward_kernel(features, rois, bids, output, f_c, f_h, f_w, r_n, a
         if h < 0 or h >= f_h or w < 0 or w >= f_w:
             output[index] = 0
         else:
-            hstart = min(math.floor(h), f_h)
-            wstart = min(math.floor(w), f_w)
+            hstart = min(math.floor(h), f_h - 2)
+            wstart = min(math.floor(w), f_w - 2)
 
             h_ratio = h - hstart
             w_ratio = w - wstart
@@ -90,8 +90,8 @@ def roi_align_backward_kernel(top_grad, rois, bids, bottom_grad, f_c, f_w, f_h, 
         w = pw * bin_size_w + roi_start_w
 
         if not (h < 0 or h >= f_h or w < 0 or w >= f_w):
-            hstart = min(math.floor(h), f_h)
-            wstart = min(math.floor(w), f_w)
+            hstart = min(math.floor(h), f_h - 2)
+            wstart = min(math.floor(w), f_w - 2)
 
             h_ratio = h - hstart
             w_ratio = w - wstart
@@ -114,10 +114,10 @@ def roi_align_forward_cuda(features, rois, bids, aligned_height, aligned_width, 
     new_bids = bids * f_c * f_h * f_w
     new_rois = rois * spatial_scale
 
-    roi_width = torch.clamp(new_rois[:, 2] - new_rois[:, 0], 0)
-    roi_height = torch.clamp(new_rois[:, 3] - new_rois[:, 1], 0)
-    roi_bin_width = roi_width / aligned_width
-    roi_bin_height = roi_height / aligned_height
+    roi_width = torch.clamp(new_rois[:, 2] - new_rois[:, 0] + 1, 0)
+    roi_height = torch.clamp(new_rois[:, 3] - new_rois[:, 1] + 1, 0)
+    roi_bin_width = roi_width / (aligned_width - 1)
+    roi_bin_height = roi_height / (aligned_height - 1)
 
     new_rois[:, 2] = roi_bin_width
     new_rois[:, 3] = roi_bin_height
@@ -153,10 +153,10 @@ def roi_align_backward_cuda(top_grad, rois, bids, aligned_height, aligned_width,
     new_bids = bids * f_c * f_h * f_w
     new_rois = rois * spatial_scale
 
-    roi_width = torch.clamp(new_rois[:, 2] - new_rois[:, 0], 0)
-    roi_height = torch.clamp(new_rois[:, 3] - new_rois[:, 1], 0)
-    roi_bin_width = roi_width / aligned_width
-    roi_bin_height = roi_height / aligned_height
+    roi_width = torch.clamp(new_rois[:, 2] - new_rois[:, 0] + 1, 0)
+    roi_height = torch.clamp(new_rois[:, 3] - new_rois[:, 1] + 1, 0)
+    roi_bin_width = roi_width / (aligned_width - 1)
+    roi_bin_height = roi_height / (aligned_height - 1)
 
     new_rois[:, 2] = roi_bin_width
     new_rois[:, 3] = roi_bin_height

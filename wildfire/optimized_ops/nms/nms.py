@@ -8,7 +8,7 @@ def nms_kernel(boxes, thresh):
     x2 = boxes[:, 2]
     y2 = boxes[:, 3]
 
-    areas = (x2 - x1) * (y2 - y1)
+    areas = (x2 - x1 + 1) * (y2 - y1 + 1)
 
     n_boxes = boxes.shape[0]
     suppressed = np.zeros((n_boxes, ), dtype=np.int)
@@ -28,8 +28,8 @@ def nms_kernel(boxes, thresh):
             yy1 = max(iy1, y1[j])
             xx2 = min(ix2, x2[j])
             yy2 = min(iy2, y2[j])
-            w = max(0.0, xx2 - xx1)
-            h = max(0.0, yy2 - yy1)
+            w = max(0.0, xx2 - xx1 + 1)
+            h = max(0.0, yy2 - yy1 + 1)
             inter = w * h
             ovr = inter / (iarea + areas[j] - inter)
             if ovr >= thresh:

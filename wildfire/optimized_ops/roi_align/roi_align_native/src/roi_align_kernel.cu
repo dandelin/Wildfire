@@ -37,16 +37,16 @@ extern "C" {
             float roi_end_h = bottom_rois[n * 5 + 4] * spatial_scale;
 
             // Force malformed ROIs to be 1x1
-            float roi_width = fmaxf(roi_end_w - roi_start_w, 0.);
-            float roi_height = fmaxf(roi_end_h - roi_start_h, 0.);
-            float bin_size_h = roi_height / (aligned_height);
-            float bin_size_w = roi_width / (aligned_width);
+            float roi_width = fmaxf(roi_end_w - roi_start_w + 1., 0.);
+            float roi_height = fmaxf(roi_end_h - roi_start_h + 1., 0.);
+            float bin_size_h = roi_height / (aligned_height - 1.);
+            float bin_size_w = roi_width / (aligned_width - 1.);
 
             float h = (float)(ph) * bin_size_h + roi_start_h;
             float w = (float)(pw) * bin_size_w + roi_start_w;
 
-            int hstart = fminf(floor(h), height);
-            int wstart = fminf(floor(w), width);
+            int hstart = fminf(floor(h), height - 2);
+            int wstart = fminf(floor(w), width - 2);
 
             int img_start = roi_batch_ind * channels * height * width;
 
@@ -112,16 +112,16 @@ extern "C" {
             /* int roi_end_h = round(bottom_rois[4] * spatial_scale); */
 
             // Force malformed ROIs to be 1x1
-            float roi_width = fmaxf(roi_end_w - roi_start_w, 0.);
-            float roi_height = fmaxf(roi_end_h - roi_start_h, 0.);
-            float bin_size_h = roi_height / (aligned_height);
-            float bin_size_w = roi_width / (aligned_width);
+            float roi_width = fmaxf(roi_end_w - roi_start_w + 1., 0.);
+            float roi_height = fmaxf(roi_end_h - roi_start_h + 1., 0.);
+            float bin_size_h = roi_height / (aligned_height - 1.);
+            float bin_size_w = roi_width / (aligned_width - 1.);
 
             float h = (float)(ph) * bin_size_h + roi_start_h;
             float w = (float)(pw) * bin_size_w + roi_start_w;
 
-            int hstart = fminf(floor(h), height);
-            int wstart = fminf(floor(w), width);
+            int hstart = fminf(floor(h), height - 2);
+            int wstart = fminf(floor(w), width - 2);
 
             int img_start = roi_batch_ind * channels * height * width;
 

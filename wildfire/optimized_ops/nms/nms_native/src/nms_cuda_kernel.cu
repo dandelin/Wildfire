@@ -31,10 +31,10 @@ int const threadsPerBlock = sizeof(unsigned long long) * 8;
 __device__ inline float devIoU(float const * const a, float const * const b) {
   float left = max(a[0], b[0]), right = min(a[2], b[2]);
   float top = max(a[1], b[1]), bottom = min(a[3], b[3]);
-  float width = max(right - left, 0.f), height = max(bottom - top, 0.f);
+  float width = max(right - left + 1, 0.f), height = max(bottom - top + 1, 0.f);
   float interS = width * height;
-  float Sa = (a[2] - a[0]) * (a[3] - a[1]);
-  float Sb = (b[2] - b[0]) * (b[3] - b[1]);
+  float Sa = (a[2] - a[0] + 1) * (a[3] - a[1] + 1);
+  float Sb = (b[2] - b[0] + 1) * (b[3] - b[1] + 1);
   return interS / (Sa + Sb - interS);
 }
 
@@ -107,7 +107,7 @@ void nms_cuda_compute(int* keep_out, int *num_out, float* boxes_host, int boxes_
   dim3 threads(threadsPerBlock);
 
   // printf("i am at line %d\n", boxes_num);
-  // printf("i am at line %d\n", boxes_dim);  
+  // printf("i am at line %d\n", boxes_dim);
 
   nms_kernel<<<blocks, threads>>>(boxes_num,
                                   nms_overlap_thresh,
@@ -144,14 +144,14 @@ void nms_cuda_compute(int* keep_out, int *num_out, float* boxes_host, int boxes_
   }
 
   // copy keep_out_cpu to keep_out on gpu
-  CUDA_WARN(cudaMemcpy(keep_out, keep_out_cpu, boxes_num * sizeof(int),cudaMemcpyHostToDevice));  
+  CUDA_WARN(cudaMemcpy(keep_out, keep_out_cpu, boxes_num * sizeof(int),cudaMemcpyHostToDevice));
 
   // *num_out = num_to_keep;
 
   // original: *num_out = num_to_keep;
   // copy num_to_keep to num_out on gpu
 
-  CUDA_WARN(cudaMemcpy(num_out, &num_to_keep, 1 * sizeof(int),cudaMemcpyHostToDevice));  
+  CUDA_WARN(cudaMemcpy(num_out, &num_to_keep, 1 * sizeof(int),cudaMemcpyHostToDevice));
 
   // release cuda memory
   CUDA_CHECK(cudaFree(boxes_dev));
