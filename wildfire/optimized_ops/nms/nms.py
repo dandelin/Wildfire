@@ -148,10 +148,11 @@ def nms(boxes, criteria, thresh, pre=None, post=None, soft=False):
 
     if soft:
         boxes = torch.cat([bbox, crits.unsqueeze(1)], dim=1)
-        _, keep = soft_nms_kernel(boxes.cpu().numpy())
+        boxes, keep = soft_nms_kernel(boxes.cpu().numpy(), Nt=thresh, method=2)
+        boxes = torch.tensor(boxes)
+        keep = keep[:post]
+        return boxes[:, :4], boxes[:, 4], sort_idx[keep]
     else:
         keep = nms_kernel(bbox.cpu().numpy(), thresh)
-
-    keep = keep[:post]
-
-    return sort_idx[keep]
+        keep = keep[:post]
+        return sort_idx[keep]
