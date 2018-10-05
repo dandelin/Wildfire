@@ -28,7 +28,6 @@ def typestr(tensor):
     return endianness + types[tensor.dtype]
 
 def link_tensor(tensor):
-    cuda.select_device(tensor.get_device())
     cai_dict = {
         'shape': tuple(tensor.shape),
         'data': (tensor.data_ptr(), False),
@@ -38,7 +37,9 @@ def link_tensor(tensor):
         'descr': [('', typestr(tensor))]
     }
     setattr(tensor, '__cuda_array_interface__', cai_dict)
-    device_array = cuda.as_cuda_array(tensor)
+
+    with cuda.devices.gpus[tensor.device.index]:
+        device_array = cuda.as_cuda_array(tensor)
     return device_array
 
 @cuda.jit
