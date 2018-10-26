@@ -104,81 +104,83 @@ def roi_align_backward_kernel(top_grad, rois, bids, bottom_grad, f_c, f_w, f_h, 
 
 
 def roi_align_forward_cuda(features, rois, bids, aligned_height, aligned_width, spatial_scale):
-    thread_per_block = 64
-    f_n, f_c, f_h, f_w = features.shape
-    r_n, _5 = rois.shape
-    aligned_height, aligned_width, spatial_scale = aligned_height.item(), aligned_width.item(), spatial_scale.item()
+    with torch.no_grad():
+        thread_per_block = 1024
+        f_n, f_c, f_h, f_w = features.shape
+        r_n, _5 = rois.shape
+        aligned_height, aligned_width, spatial_scale = aligned_height.item(), aligned_width.item(), spatial_scale.item()
 
-    output = features.new(rois.size(0), features.size(1), aligned_height, aligned_width).zero_()
+        output = features.new(rois.size(0), features.size(1), aligned_height, aligned_width).zero_()
 
-    new_bids = bids * f_c * f_h * f_w
-    new_rois = rois * spatial_scale
+        new_bids = bids * f_c * f_h * f_w
+        new_rois = rois * spatial_scale
 
-    roi_width = torch.clamp(new_rois[:, 2] - new_rois[:, 0] + 1, 0)
-    roi_height = torch.clamp(new_rois[:, 3] - new_rois[:, 1] + 1, 0)
-    roi_bin_width = roi_width / (aligned_width - 1)
-    roi_bin_height = roi_height / (aligned_height - 1)
+        roi_width = torch.clamp(new_rois[:, 2] - new_rois[:, 0] + 1, 0)
+        roi_height = torch.clamp(new_rois[:, 3] - new_rois[:, 1] + 1, 0)
+        roi_bin_width = roi_width / (aligned_width - 1)
+        roi_bin_height = roi_height / (aligned_height - 1)
 
-    new_rois[:, 2] = roi_bin_width
-    new_rois[:, 3] = roi_bin_height
+        new_rois[:, 2] = roi_bin_width
+        new_rois[:, 3] = roi_bin_height
 
-    features_flat = features.reshape(-1)
-    rois_flat = new_rois.reshape(-1)
-    bids_flat = new_bids.reshape(-1)
-    output_flat = output.reshape(-1)
+        features_flat = features.view(-1)
+        rois_flat = new_rois.view(-1)
+        bids_flat = new_bids.view(-1)
+        output_flat = output.view(-1)
 
-    blocks = (output.numel() + thread_per_block - 1) // thread_per_block
-    threads = thread_per_block
+        blocks = (output.numel() + thread_per_block - 1) // thread_per_block
+        threads = thread_per_block
 
-    features_l = link_tensor(features_flat)
-    rois_l = link_tensor(rois_flat)
-    bids_l = link_tensor(bids_flat)
-    output_l = link_tensor(output_flat)
+        features_l = link_tensor(features_flat)
+        rois_l = link_tensor(rois_flat)
+        bids_l = link_tensor(bids_flat)
+        output_l = link_tensor(output_flat)
 
-    roi_align_forward_kernel[blocks, threads](
-        features_l, rois_l, bids_l, output_l, f_c, f_h, f_w, r_n, aligned_height, aligned_width
-    )
+        roi_align_forward_kernel[blocks, threads](
+            features_l, rois_l, bids_l, output_l, f_c, f_h, f_w, r_n, aligned_height, aligned_width
+        )
 
-    return output_flat.reshape(rois.size(0), features.size(1), aligned_height, aligned_width)
+    return output_flat.view(rois.size(0), features.size(1), aligned_height, aligned_width)
 
 
 def roi_align_backward_cuda(top_grad, rois, bids, aligned_height, aligned_width, spatial_scale, feature_size):
-    thread_per_block = 64
-    f_n, f_c, f_h, f_w = feature_size
-    r_n, _5 = rois.shape
-    aligned_height, aligned_width, spatial_scale = aligned_height.item(), aligned_width.item(), spatial_scale.item()
+    with torch.no_grad():
+        thread_per_block = 1024
+        f_n, f_c, f_h, f_w = feature_size
+        r_n, _5 = rois.shape
+        aligned_height, aligned_width, spatial_scale = aligned_height.item(), aligned_width.item(), spatial_scale.item()
 
-    bottom_grad = top_grad.new(f_n, f_c, f_h, f_w).zero_()
+        bottom_grad = top_grad.new(f_n, f_c, f_h, f_w).zero_()
 
-    new_bids = bids * f_c * f_h * f_w
-    new_rois = rois * spatial_scale
+        new_bids = bids * f_c * f_h * f_w
+        new_rois = rois * spatial_scale
 
-    roi_width = torch.clamp(new_rois[:, 2] - new_rois[:, 0] + 1, 0)
-    roi_height = torch.clamp(new_rois[:, 3] - new_rois[:, 1] + 1, 0)
-    roi_bin_width = roi_width / (aligned_width - 1)
-    roi_bin_height = roi_height / (aligned_height - 1)
+        roi_width = torch.clamp(new_rois[:, 2] - new_rois[:, 0] + 1, 0)
+        roi_height = torch.clamp(new_rois[:, 3] - new_rois[:, 1] + 1, 0)
+        roi_bin_width = roi_width / (aligned_width - 1)
+        roi_bin_height = roi_height / (aligned_height - 1)
 
-    new_rois[:, 2] = roi_bin_width
-    new_rois[:, 3] = roi_bin_height
+        new_rois[:, 2] = roi_bin_width
+        new_rois[:, 3] = roi_bin_height
 
-    top_grad_flat = top_grad.reshape(-1)
-    rois_flat = new_rois.reshape(-1)
-    bids_flat = new_bids.reshape(-1)
-    bottom_grad_flat = bottom_grad.reshape(-1)
+        top_grad_flat = top_grad.view(-1)
+        rois_flat = new_rois.view(-1)
+        bids_flat = new_bids.view(-1)
+        bottom_grad_flat = bottom_grad.view(-1)
 
-    blocks = (r_n * aligned_height * aligned_width * f_c + thread_per_block - 1) // thread_per_block
-    threads = thread_per_block
+        blocks = (r_n * aligned_height * aligned_width * f_c + thread_per_block - 1) // thread_per_block
+        threads = thread_per_block
 
-    top_grad_l = link_tensor(top_grad_flat)
-    rois_l = link_tensor(rois_flat)
-    bids_l = link_tensor(bids_flat)
-    bottom_grad_l = link_tensor(bottom_grad_flat)
+        top_grad_l = link_tensor(top_grad_flat)
+        rois_l = link_tensor(rois_flat)
+        bids_l = link_tensor(bids_flat)
+        bottom_grad_l = link_tensor(bottom_grad_flat)
 
-    roi_align_backward_kernel[blocks, threads](
-        top_grad_l, rois_l, bids_l, bottom_grad_l, f_c, f_w, f_h, r_n, aligned_height, aligned_width
-    )
+        roi_align_backward_kernel[blocks, threads](
+            top_grad_l, rois_l, bids_l, bottom_grad_l, f_c, f_w, f_h, r_n, aligned_height, aligned_width
+        )
 
-    return bottom_grad_flat.reshape(f_n, f_c, f_h, f_w)
+    return bottom_grad_flat.view(f_n, f_c, f_h, f_w)
 
 
 class RoIAlignFunction(Function):
