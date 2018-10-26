@@ -153,6 +153,6 @@ def nms(boxes, criteria, thresh, pre=None, post=None, soft=False):
         keep = keep[:post]
         return boxes[:, :4], boxes[:, 4], sort_idx[keep]
     else:
-        keep = nms_kernel(bbox.cpu().numpy(), thresh)
+        keep = nms_kernel(bbox.detach().cpu().numpy(), thresh)
         keep = keep[:post]
         return sort_idx[keep]
